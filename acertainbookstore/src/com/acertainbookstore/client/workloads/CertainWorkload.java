@@ -4,12 +4,16 @@
 package com.acertainbookstore.client.workloads;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
 import com.acertainbookstore.business.CertainBookStore;
+import com.acertainbookstore.business.ImmutableStockBook;
+import com.acertainbookstore.business.StockBook;
 import com.acertainbookstore.client.BookStoreHTTPProxy;
 import com.acertainbookstore.client.StockManagerHTTPProxy;
 import com.acertainbookstore.interfaces.BookStore;
@@ -92,6 +96,20 @@ public class CertainWorkload {
 	 */
 	public static void reportMetric(List<WorkerRunResult> workerRunResults) {
 		// TODO: You should aggregate metrics and output them for plotting here
+		
+		float agg_Troughput = 0f;
+		float latency = 0f;
+		
+		for (WorkerRunResult res : workerRunResults) {
+			agg_Troughput += (float) res.getSuccessfulInteractions() / res.getElapsedTimeInNanoSecs();
+			latency += (float) res.getTotalRuns() / res.getElapsedTimeInNanoSecs();
+		}
+		
+		// Compute the average latency
+		latency /= workerRunResults.size();
+		
+		// Now plot the metrics
+		
 	}
 
 	/**
@@ -103,7 +121,12 @@ public class CertainWorkload {
 	public static void initializeBookStoreData(BookStore bookStore,
 			StockManager stockManager) throws BookStoreException {
 
-		// TODO: You should initialize data for your bookstore here
+		// Create new BookSetGenerator
+		BookSetGenerator bsg = new BookSetGenerator();
+		// Get a number of randomized StockBooks
+		Set<StockBook> booksToAdd = bsg.nextSetOfStockBooks(100);
+		// Add them to the StockManager
+		stockManager.addBooks(booksToAdd);
 
 	}
 }
