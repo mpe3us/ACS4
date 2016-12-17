@@ -41,7 +41,7 @@ public class BookSetGenerator {
 		int randIndex = -1;
 		for (int i = 0; i < num; i++) {
 			// Get next random index
-			randIndex = rn.nextInt(isbns.size() + 1);	
+			randIndex = rn.nextInt(isbns.size());	
 			// Get the isbn
 			Integer curValue = (Integer) isbns.toArray()[randIndex];
 			// Add it to the Set we want to return

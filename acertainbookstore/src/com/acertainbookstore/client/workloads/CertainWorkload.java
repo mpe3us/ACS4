@@ -3,7 +3,13 @@
  */
 package com.acertainbookstore.client.workloads;
 
+import java.nio.charset.Charset;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -30,63 +36,79 @@ import com.acertainbookstore.utils.BookStoreException;
  */
 public class CertainWorkload {
 
+	
+	private static final int MAX_THREADS = 100;
+	private static final int THREADS_BETWEEN_ITERATIONS = 5;
+	
 	/**
 	 * @param args
 	 */
 	public static void main(String[] args) throws Exception {
-		int numConcurrentWorkloadThreads = 10;
-		String serverAddress = "http://localhost:8081";
-		boolean localTest = true;
-		List<WorkerRunResult> workerRunResults = new ArrayList<WorkerRunResult>();
-		List<Future<WorkerRunResult>> runResults = new ArrayList<Future<WorkerRunResult>>();
-
-		// Initialize the RPC interfaces if its not a localTest, the variable is
-		// overriden if the property is set
-		String localTestProperty = System
-				.getProperty(BookStoreConstants.PROPERTY_KEY_LOCAL_TEST);
-		localTest = (localTestProperty != null) ? Boolean
-				.parseBoolean(localTestProperty) : localTest;
-
-		BookStore bookStore = null;
-		StockManager stockManager = null;
-		if (localTest) {
-			CertainBookStore store = new CertainBookStore();
-			bookStore = store;
-			stockManager = store;
-		} else {
-			stockManager = new StockManagerHTTPProxy(serverAddress + "/stock");
-			bookStore = new BookStoreHTTPProxy(serverAddress);
+				
+		for (int n = 5; n <= MAX_THREADS; n += THREADS_BETWEEN_ITERATIONS) {
+		
+			System.out.println("n:" + n);
+			
+			int numConcurrentWorkloadThreads = n;
+			String serverAddress = "http://localhost:8081";	
+			boolean localTest = true;
+			List<WorkerRunResult> workerRunResults = new ArrayList<WorkerRunResult>();
+			List<Future<WorkerRunResult>> runResults = new ArrayList<Future<WorkerRunResult>>();
+	
+			// Initialize the RPC interfaces if its not a localTest, the variable is
+			// overriden if the property is set
+			String localTestProperty = System
+					.getProperty(BookStoreConstants.PROPERTY_KEY_LOCAL_TEST);
+			localTest = (localTestProperty != null) ? Boolean
+					.parseBoolean(localTestProperty) : localTest;
+	
+			BookStore bookStore = null;
+			StockManager stockManager = null;
+			if (localTest) {
+				CertainBookStore store = new CertainBookStore();
+				bookStore = store;
+				stockManager = store;
+			} else {
+				stockManager = new StockManagerHTTPProxy(serverAddress + "/stock");
+				bookStore = new BookStoreHTTPProxy(serverAddress);
+			}
+	
+			// Generate data in the bookstore before running the workload
+			initializeBookStoreData(bookStore, stockManager);
+	
+			ExecutorService exec = Executors
+					.newFixedThreadPool(numConcurrentWorkloadThreads);
+	
+			for (int i = 0; i < numConcurrentWorkloadThreads; i++) {
+				WorkloadConfiguration config = new WorkloadConfiguration(bookStore,
+						stockManager);
+				Worker workerTask = new Worker(config);
+				// Keep the futures to wait for the result from the thread
+				runResults.add(exec.submit(workerTask));
+			}
+	
+			//System.out.println("test1");
+			
+			// Get the results from the threads using the futures returned
+			for (Future<WorkerRunResult> futureRunResult : runResults) {
+				WorkerRunResult runResult = futureRunResult.get(); // blocking call
+				workerRunResults.add(runResult);
+			}
+	
+			//System.out.println("test2");
+			
+			exec.shutdownNow(); // shutdown the executor
+	
+			//System.out.println("test3");
+			
+			// Finished initialization, stop the clients if not localTest
+			if (!localTest) {
+				((BookStoreHTTPProxy) bookStore).stop();
+				((StockManagerHTTPProxy) stockManager).stop();
+			}
+	
+			reportMetric(workerRunResults, localTest);
 		}
-
-		// Generate data in the bookstore before running the workload
-		initializeBookStoreData(bookStore, stockManager);
-
-		ExecutorService exec = Executors
-				.newFixedThreadPool(numConcurrentWorkloadThreads);
-
-		for (int i = 0; i < numConcurrentWorkloadThreads; i++) {
-			WorkloadConfiguration config = new WorkloadConfiguration(bookStore,
-					stockManager);
-			Worker workerTask = new Worker(config);
-			// Keep the futures to wait for the result from the thread
-			runResults.add(exec.submit(workerTask));
-		}
-
-		// Get the results from the threads using the futures returned
-		for (Future<WorkerRunResult> futureRunResult : runResults) {
-			WorkerRunResult runResult = futureRunResult.get(); // blocking call
-			workerRunResults.add(runResult);
-		}
-
-		exec.shutdownNow(); // shutdown the executor
-
-		// Finished initialization, stop the clients if not localTest
-		if (!localTest) {
-			((BookStoreHTTPProxy) bookStore).stop();
-			((StockManagerHTTPProxy) stockManager).stop();
-		}
-
-		reportMetric(workerRunResults);
 	}
 
 	/**
@@ -94,12 +116,12 @@ public class CertainWorkload {
 	 * 
 	 * @param workerRunResults
 	 */
-	public static void reportMetric(List<WorkerRunResult> workerRunResults) {
+	public static void reportMetric(List<WorkerRunResult> workerRunResults, boolean localTest) {
 		// TODO: You should aggregate metrics and output them for plotting here
 		
 		float agg_Troughput = 0f;
-		float latency = 0f;
-		
+		float latency = 0f;		
+	
 		for (WorkerRunResult res : workerRunResults) {
 			agg_Troughput += (float) res.getSuccessfulInteractions() / res.getElapsedTimeInNanoSecs();
 			latency += (float) res.getTotalRuns() / res.getElapsedTimeInNanoSecs();
@@ -107,8 +129,33 @@ public class CertainWorkload {
 		
 		// Compute the average latency
 		latency /= workerRunResults.size();
+
+		//System.out.println("agg throughput: " + agg_Troughput);
+		//System.out.println("latency: " + latency);
 		
-		// Now plot the metrics
+		
+		int numConcurrentWorkloadThreads = workerRunResults.size();
+		
+		// Outout the metrics
+		List<String> fileT_lines = Arrays.asList(agg_Troughput + ", " + numConcurrentWorkloadThreads);
+	    List<String> fileL_lines = Arrays.asList(latency + ", " + numConcurrentWorkloadThreads);
+	    try {
+	    	if (localTest) {
+	    	    Path fileT_local = Paths.get("fileT_local.txt");
+	    	    Path fileL_local = Paths.get("fileL_local.txt");
+	    		Files.write(fileT_local, fileT_lines, Charset.forName("UTF-8"), StandardOpenOption.APPEND);
+	    		Files.write(fileL_local, fileL_lines, Charset.forName("UTF-8"), StandardOpenOption.APPEND);
+	    	}
+	    	else {
+	    	    Path fileT_http  = Paths.get("fileT_http.txt");
+	    	    Path fileL_http  = Paths.get("fileL_http.txt");
+	    	    Files.write(fileT_http, fileT_lines, Charset.forName("UTF-8"));
+	    		Files.write(fileL_http, fileL_lines, Charset.forName("UTF-8"));
+	    	}
+	    }
+	    catch (Exception e) {
+	    	System.out.println("Problem writing to file: " + e);
+	    }
 		
 	}
 
