@@ -72,7 +72,7 @@ public class BookSetGenerator {
 		// Now create the specified number of books
 		for (int i = 0; i < num; i++) {		
 			// Get current unique isbn
-			int curIsbn = rn.nextInt(9999999);
+			int curIsbn = rn.nextInt(99999999);
 			// Generate random properties
 			String title = String.valueOf(rn.nextInt(bound));
 			String author = String.valueOf(rn.nextInt(bound));
